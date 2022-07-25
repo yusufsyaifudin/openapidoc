@@ -6,29 +6,28 @@ import (
 	"github.com/getkin/kin-openapi/openapi3gen"
 	"github.com/yusufsyaifudin/openapidoc/header"
 	"github.com/yusufsyaifudin/openapidoc/utils"
+	"strings"
 )
 
-type Config struct {
-	Description string
-}
-
 type Response struct {
-	Config Config
 
 	// bodies map k = content type, v = struct data
 	bodies map[string]interface{}
 
 	// headers is the header map of this response
 	headers []*header.Header
+
+	// descriptions response description
+	descriptions []string
 }
 
 // NewResponse only return one openapi3respRef openapi3.ResponseRef.
 // If one path can contain multiple response openapi3schema, then it must have different http code.
-func NewResponse(cfg Config) *Response {
+func NewResponse() *Response {
 	return &Response{
-		Config:  cfg,
-		bodies:  map[string]interface{}{},
-		headers: make([]*header.Header, 0),
+		bodies:       map[string]interface{}{},
+		headers:      make([]*header.Header, 0),
+		descriptions: make([]string, 0),
 	}
 }
 
@@ -43,11 +42,17 @@ func (r *Response) Header(h *header.Header) *Response {
 	return r
 }
 
+// Description will be added to new line each called.
+func (r *Response) Description(desc string) *Response {
+	r.descriptions = append(r.descriptions, desc)
+	return r
+}
+
 // Components returns openapi3.Components with the value of following fields:
 // * openapi3.Schemas
 // * openapi3.Headers
 // * openapi3.Responses
-func (r *Response) Components(gen *openapi3gen.Generator, responseName string) (components openapi3.Components, err error) {
+func (r *Response) Components(gen *openapi3gen.Generator, responseName, httpCode string) (components openapi3.Components, err error) {
 
 	components = openapi3.NewComponents()
 
@@ -78,9 +83,32 @@ func (r *Response) Components(gen *openapi3gen.Generator, responseName string) (
 
 	openapi3schema := make(map[string]*openapi3.SchemaRef)
 	openapi3respRef := &openapi3.ResponseRef{}
+	openapi3respRef.Value = &openapi3.Response{}
+
+	// responses should have required property 'description'
+	desc := strings.Join(r.descriptions, "\n\n")
+	openapi3respRef.Value.Description = &desc
+
+	// response header should write here, because even if we have multiple content type,
+	// it will share the same response headers.
+	openapi3respRef.Value.Headers = map[string]*openapi3.HeaderRef{}
+	for headerKey, headerRefName := range allHeaderRef {
+		openapi3respRef.Value.Headers[headerKey] = &openapi3.HeaderRef{
+			Ref: headerRefName,
+		}
+	}
+
+	// same response can have multiple response schema for different content type
+	openapi3respRef.Value.Content = make(map[string]*openapi3.MediaType)
+
+	// only one response can be generated.
+	// We design that 1 Response is represents only to specific method and path.
+	// If user want to add multiple response with different method or path, they must call NewResponse() multiple times.
+	openapi3responseBodies := make(map[string]*openapi3.ResponseRef)
 
 	for contentType, bodyPayload := range r.bodies {
 		// generate schemaRef and add to the openapi3schema map
+		// if bodyPayload is come from the same struct that we defined in some places, then it will use the same schema name
 		schemaName := fmt.Sprintf("%T", bodyPayload)
 
 		var schemaRef *openapi3.SchemaRef
@@ -92,48 +120,22 @@ func (r *Response) Components(gen *openapi3gen.Generator, responseName string) (
 
 		openapi3schema[schemaName] = schemaRef
 
-		if openapi3respRef == nil {
-			openapi3respRef = &openapi3.ResponseRef{}
-		}
-
-		if openapi3respRef.Value == nil {
-			openapi3respRef.Value = &openapi3.Response{}
-		}
-
-		// responses should have required property 'description'
-		openapi3respRef.Value.Description = &r.Config.Description
-
-		// response header should write here
-		if openapi3respRef.Value.Headers == nil {
-			openapi3respRef.Value.Headers = map[string]*openapi3.HeaderRef{}
-		}
-
-		for headerKey, headerRefName := range allHeaderRef {
-			openapi3respRef.Value.Headers[headerKey] = &openapi3.HeaderRef{
-				Ref: headerRefName,
-			}
-		}
-
-		if openapi3respRef.Value.Content == nil {
-			openapi3respRef.Value.Content = make(map[string]*openapi3.MediaType)
-		}
-
-		// refer the created openapi3schema to responses
-		// if openapi3schema responses for the same contentType is already exist then replace it,
-		// if contentType is different, then add it.
+		// refer the created openapi3schema to responses.
 		openapi3respRef.Value.Content[contentType] = &openapi3.MediaType{
 			Schema: &openapi3.SchemaRef{
 				Ref: fmt.Sprintf("#/components/schemas/%s", schemaName),
 			},
 		}
 
+		// responses can have the same content type (i.e: application/json), but different payload
+		// i.e: http 200 OK, can have different payload depending on request body.
+		// But, please note that if we already define the content type with specific http code, the values will be overrided.
+		// i.e: we add 200 OK and application/json with payload {"foo": "bar"}
+		// then we add again 200 OK and text/html with payload <html></html>
+		// the text/html will be used as the response for http status 200 because it is the latest data we push
+		responseName = fmt.Sprintf("%s-%s", responseName, httpCode)
+		openapi3responseBodies[responseName] = openapi3respRef
 	}
-
-	// only one response can be generated.
-	// We design that 1 Response is represents only to specific method and path.
-	// If user want to add multiple response with different method or path, they must call NewResponse() multiple times.
-	openapi3responseBodies := make(map[string]*openapi3.ResponseRef)
-	openapi3responseBodies[responseName] = openapi3respRef
 
 	// output
 	respComponents := openapi3.Components{

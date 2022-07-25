@@ -7,6 +7,7 @@ import (
 	"github.com/yusufsyaifudin/openapidoc/header"
 	"github.com/yusufsyaifudin/openapidoc/utils"
 	"reflect"
+	"strings"
 )
 
 type PathParam struct {
@@ -24,6 +25,12 @@ type Request struct {
 
 	// pathParams path parameters
 	pathParams []PathParam
+
+	// descriptions request description
+	descriptions []string
+
+	// required to mark whether this body payload is required or not
+	required bool
 }
 
 func NewRequest() *Request {
@@ -49,6 +56,18 @@ func (r *Request) PathParams(params ...PathParam) *Request {
 		r.pathParams = append(r.pathParams, param)
 	}
 
+	return r
+}
+
+// Description will be added to new line each called.
+func (r *Request) Description(desc string) *Request {
+	r.descriptions = append(r.descriptions, desc)
+	return r
+}
+
+// Required must be called once to mark whether this Request is required or not.
+func (r *Request) Required(required bool) *Request {
+	r.required = required
 	return r
 }
 
@@ -115,6 +134,11 @@ func (r *Request) Components(gen *openapi3gen.Generator, requestName string) (co
 	// Define openapi3bodyRef here to ensure that this Request support multiple content type with different payload.
 	// If openapi3bodyRef is first generated, then it will have Value.Content = nil
 	openapi3bodyRef := &openapi3.RequestBodyRef{}
+	openapi3bodyRef.Value = &openapi3.RequestBody{}
+	openapi3bodyRef.Value.Required = r.required
+	openapi3bodyRef.Value.Description = strings.Join(r.descriptions, "\n\n")
+	openapi3bodyRef.Value.Content = make(map[string]*openapi3.MediaType)
+
 	for contentType, bodyPayload := range r.bodies {
 		// generate schemaRef and add to the schema map
 		schemaName := fmt.Sprintf("%T", bodyPayload)
@@ -127,14 +151,6 @@ func (r *Request) Components(gen *openapi3gen.Generator, requestName string) (co
 		}
 
 		openapi3schema[schemaName] = schemaRef
-
-		if openapi3bodyRef.Value == nil {
-			openapi3bodyRef.Value = &openapi3.RequestBody{}
-		}
-
-		if openapi3bodyRef.Value.Content == nil {
-			openapi3bodyRef.Value.Content = make(map[string]*openapi3.MediaType)
-		}
 
 		// refer the created schema to openapi3RequestBodies
 		// if schema openapi3RequestBodies for the same contentType is already exist then replace it,

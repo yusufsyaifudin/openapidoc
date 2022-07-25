@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3gen"
 	"github.com/yusufsyaifudin/openapidoc"
 	"github.com/yusufsyaifudin/openapidoc/header"
 	"github.com/yusufsyaifudin/openapidoc/request"
@@ -12,39 +11,36 @@ import (
 	"github.com/yusufsyaifudin/openapidoc/utils"
 	"log"
 	"net/http"
-	"reflect"
 )
 
 type Pet struct {
-	Name  string `json:"name"`
-	Sound string `json:"sound"`
+	ID              int      `json:"id" openapi3:"ex:2"`
+	Name            string   `json:"name"`
+	Sound           string   `json:"sound"`
+	IsBark          bool     `json:"isBark" openapi3:"ex:true"`
+	OtherAttributes []string `json:"otherAttributes" openapi3:"ex:'a;b'"`
 }
 
 type PetCreateReq struct {
-	SimpleStr string   `json:"simpleStr"`
-	Strings   []string `json:"strings"`
-	Pet       *Pet     `json:"pet"`
+	Pet *Pet `json:"pet" openapi3:"required:'id;name;sound'"`
 }
 
 type PetCreateResp struct {
 	Data struct {
-		Pet *Pet `json:"pet"`
+		Pet *Pet `json:"pet" openapi3:"desc:'pet schema'"`
 	} `json:"data"`
 }
 
+type ErrorData struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type Error struct {
+	Error ErrorData `json:"error,omitempty" openapi3:"desc:xxx"`
+}
+
 func main() {
-	customizer := func(name string, t reflect.Type, tag reflect.StructTag, schema *openapi3.Schema) error {
-		schema.Description = tag.Get("desc")
-
-		switch t.Kind() {
-		case reflect.String:
-			schema.Example = tag.Get("ex")
-		}
-
-		return nil
-	}
-
-	gen := openapi3gen.NewGenerator(openapi3gen.SchemaCustomizer(customizer))
 
 	info := &openapi3.Info{
 		Title:          "My Server",
@@ -69,7 +65,6 @@ func main() {
 	}
 
 	cfg := openapidoc.Config{
-		Generator:  gen,
 		ServerInfo: info,
 		Servers:    servers,
 	}
@@ -78,6 +73,7 @@ func main() {
 
 	reg.Add(http.MethodPost, "/pets/{id}",
 		request.NewRequest().
+			Required(true).
 			Body("application/json", PetCreateReq{}).
 			PathParams(request.PathParam{Name: "id", Value: 1, Description: "Pet ID"}).
 			Header(header.NewHeader().
@@ -86,11 +82,13 @@ func main() {
 
 		map[string]*response.Response{
 			// response 201
-			fmt.Sprintf("%d", http.StatusCreated): response.NewResponse(response.Config{}).
+			fmt.Sprintf("%d", http.StatusCreated): response.NewResponse().
 				Body("application/json", PetCreateResp{}).
 				Header(header.NewHeader().
 					Add("Location", header.Map{Value: "/pets/:id", Description: "Newly created pets"}),
 				),
+			fmt.Sprintf("%d", http.StatusUnprocessableEntity): response.NewResponse().
+				Body("application/json", Error{}),
 		},
 	)
 
