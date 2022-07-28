@@ -10,112 +10,54 @@ import (
 	"github.com/yusufsyaifudin/openapidoc/utils"
 	"hash/fnv"
 	"net/http"
-	"reflect"
-	"strconv"
 	"strings"
 )
 
-var customizer = func(name string, t reflect.Type, tag reflect.StructTag, schema *openapi3.Schema) error {
-	tagValue := tag.Get("openapi3")
-	tagSplit := strings.Split(tagValue, ",")
-
-	tagMap := make(map[string]string)
-	for _, val := range tagSplit {
-		kv := strings.Split(val, ":")
-		kvLen := len(kv)
-		switch {
-		case kvLen >= 2:
-			tagMap[kv[0]] = strings.ReplaceAll(strings.Join(kv[1:], " "), "'", "")
-		case kvLen == 1:
-			tagMap[kv[0]] = ""
-		}
-	}
-
-	for k, v := range tagMap {
-		var (
-			desc          string
-			exampleVal    interface{}
-			requiredField []string // only valid for type object
-		)
-
-		switch k {
-		case "desc":
-			desc = v
-
-		case "ex":
-			switch t.Kind() {
-			case reflect.String:
-				vArr := strings.Split(v, ";")
-				if len(vArr) > 0 {
-					exampleVal = vArr[len(vArr)-1]
-				} else {
-					exampleVal = v
-				}
-
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-				vInt, _ := strconv.Atoi(v)
-				exampleVal = vInt
-
-			case reflect.Float32, reflect.Float64:
-				vFloat, _ := strconv.ParseFloat(v, 64)
-				exampleVal = vFloat
-
-			case reflect.Bool:
-				vBool, _ := strconv.ParseBool(v)
-				exampleVal = vBool
-
-			case reflect.Array, reflect.Slice:
-				exampleVal = strings.Split(v, ";")
-
-			default:
-				exampleVal = v
-			}
-
-		case "required":
-			switch t.Kind() {
-			case reflect.Map, reflect.Struct, reflect.Pointer:
-				requiredField = strings.Split(v, ";")
-			}
-		}
-
-		if desc != "" {
-			schema.Description = desc
-		}
-
-		if exampleVal != nil {
-			schema.Example = exampleVal
-		}
-
-		if len(requiredField) > 0 {
-			schema.Required = requiredField
-		}
-	}
-
-	return nil
+type Config struct {
+	generator  *openapi3gen.Generator
+	serverInfo *openapi3.Info
+	servers    openapi3.Servers
 }
 
-type Config struct {
-	Generator  *openapi3gen.Generator
-	ServerInfo *openapi3.Info
-	Servers    openapi3.Servers
+func WithGenerator(gen *openapi3gen.Generator) func(*Config) {
+	return func(config *Config) {
+		config.generator = gen
+	}
+}
+
+func WithServerInfo(serverInfo *openapi3.Info) func(*Config) {
+	return func(config *Config) {
+		config.serverInfo = serverInfo
+	}
+}
+
+func WithServers(servers openapi3.Servers) func(*Config) {
+	return func(config *Config) {
+		config.servers = servers
+	}
 }
 
 type Registry struct {
-	Config Config
+	Config *Config
 
 	paths      map[string]*openapi3.PathItem
 	components *openapi3.Components
 	err        error
 }
 
-func NewRegistry(cfg Config) *Registry {
-	if cfg.Generator == nil {
-		cfg.Generator = openapi3gen.NewGenerator(openapi3gen.SchemaCustomizer(customizer))
+func NewRegistry(configs ...func(*Config)) *Registry {
+	config := &Config{
+		generator:  openapi3gen.NewGenerator(openapi3gen.SchemaCustomizer(customizer)),
+		serverInfo: &openapi3.Info{},
+		servers:    openapi3.Servers{},
+	}
+
+	for _, cfg := range configs {
+		cfg(config)
 	}
 
 	r := &Registry{
-		Config:     cfg,
+		Config:     config,
 		paths:      make(map[string]*openapi3.PathItem),
 		components: &openapi3.Components{},
 		err:        nil,
@@ -149,7 +91,7 @@ func (r *Registry) Add(method string, path string, req *request.Request, resp ma
 
 	requestName := fmt.Sprintf("%d", hasher.Sum32())
 
-	reqComp, err := req.Components(r.Config.Generator, requestName)
+	reqComp, err := req.Components(r.Config.generator, requestName)
 	if err != nil {
 		err = fmt.Errorf("cannot create components for the request payload: %w", err)
 		r.err = multierror.Append(r.err, err)
@@ -184,6 +126,22 @@ func (r *Registry) Add(method string, path string, req *request.Request, resp ma
 		}
 
 		switch method {
+		case http.MethodGet:
+			if pathItem.Get == nil {
+				pathItem.Get = &openapi3.Operation{}
+			}
+
+			pathItem.Get.RequestBody = reqBodyRef
+			pathItem.Get.Parameters = reqParams
+
+		case http.MethodHead:
+			if pathItem.Head == nil {
+				pathItem.Head = &openapi3.Operation{}
+			}
+
+			pathItem.Head.RequestBody = reqBodyRef
+			pathItem.Head.Parameters = reqParams
+
 		case http.MethodPost:
 			if pathItem.Post == nil {
 				pathItem.Post = &openapi3.Operation{}
@@ -199,20 +157,62 @@ func (r *Registry) Add(method string, path string, req *request.Request, resp ma
 
 			pathItem.Put.RequestBody = reqBodyRef
 			pathItem.Put.Parameters = reqParams
+
+		case http.MethodPatch:
+			if pathItem.Patch == nil {
+				pathItem.Patch = &openapi3.Operation{}
+			}
+
+			pathItem.Patch.RequestBody = reqBodyRef
+			pathItem.Patch.Parameters = reqParams
+
+		case http.MethodDelete:
+			if pathItem.Delete == nil {
+				pathItem.Delete = &openapi3.Operation{}
+			}
+
+			pathItem.Delete.RequestBody = reqBodyRef
+			pathItem.Delete.Parameters = reqParams
+
+		case http.MethodConnect:
+			if pathItem.Connect == nil {
+				pathItem.Connect = &openapi3.Operation{}
+			}
+
+			pathItem.Connect.RequestBody = reqBodyRef
+			pathItem.Connect.Parameters = reqParams
+
+		case http.MethodOptions:
+			if pathItem.Options == nil {
+				pathItem.Options = &openapi3.Operation{}
+			}
+
+			pathItem.Options.RequestBody = reqBodyRef
+			pathItem.Options.Parameters = reqParams
+
+		case http.MethodTrace:
+			if pathItem.Trace == nil {
+				pathItem.Trace = &openapi3.Operation{}
+			}
+
+			pathItem.Trace.RequestBody = reqBodyRef
+			pathItem.Trace.Parameters = reqParams
+
 		}
+
 	}
 
 	// generate response for each http status code,
 	// i.e: http status 200 OK may have different schema for http status 404 Not Found
 	for httpCode, respInstance := range resp {
-		// TODO: validate http code, must valid range of http codes or 1XX, 2XX, etc
-		httpCode = strings.ToUpper(httpCode)
+		// TODO: validate http code, must valid range of http codes or 1xx, 2xx, etc
+		httpCode = strings.ToLower(httpCode)
 
 		if respInstance == nil {
 			continue
 		}
 
-		respComp, err := respInstance.Components(r.Config.Generator, requestName, httpCode)
+		respComp, err := respInstance.Components(r.Config.generator, requestName, httpCode)
 		if err != nil {
 			err = fmt.Errorf("cannot create components for the response payload %s: %w", httpCode, err)
 			r.err = multierror.Append(r.err, err)
@@ -228,6 +228,32 @@ func (r *Registry) Add(method string, path string, req *request.Request, resp ma
 			respBodyRefName := fmt.Sprintf("#/components/responses/%s", respBodyName)
 
 			switch method {
+			case http.MethodGet:
+				if pathItem.Get == nil {
+					pathItem.Get = &openapi3.Operation{}
+				}
+
+				if pathItem.Get.Responses == nil {
+					pathItem.Get.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Get.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
+			case http.MethodHead:
+				if pathItem.Head == nil {
+					pathItem.Head = &openapi3.Operation{}
+				}
+
+				if pathItem.Head.Responses == nil {
+					pathItem.Head.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Head.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
 			case http.MethodPost:
 				if pathItem.Post == nil {
 					pathItem.Post = &openapi3.Operation{}
@@ -253,6 +279,72 @@ func (r *Registry) Add(method string, path string, req *request.Request, resp ma
 				pathItem.Put.Responses[httpCode] = &openapi3.ResponseRef{
 					Ref: respBodyRefName,
 				}
+
+			case http.MethodPatch:
+				if pathItem.Patch == nil {
+					pathItem.Patch = &openapi3.Operation{}
+				}
+
+				if pathItem.Patch.Responses == nil {
+					pathItem.Patch.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Patch.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
+			case http.MethodDelete:
+				if pathItem.Delete == nil {
+					pathItem.Delete = &openapi3.Operation{}
+				}
+
+				if pathItem.Delete.Responses == nil {
+					pathItem.Delete.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Delete.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
+			case http.MethodConnect:
+				if pathItem.Connect == nil {
+					pathItem.Connect = &openapi3.Operation{}
+				}
+
+				if pathItem.Connect.Responses == nil {
+					pathItem.Connect.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Connect.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
+			case http.MethodOptions:
+				if pathItem.Options == nil {
+					pathItem.Options = &openapi3.Operation{}
+				}
+
+				if pathItem.Options.Responses == nil {
+					pathItem.Options.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Options.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
+			case http.MethodTrace:
+				if pathItem.Trace == nil {
+					pathItem.Trace = &openapi3.Operation{}
+				}
+
+				if pathItem.Trace.Responses == nil {
+					pathItem.Trace.Responses = make(map[string]*openapi3.ResponseRef)
+				}
+
+				pathItem.Trace.Responses[httpCode] = &openapi3.ResponseRef{
+					Ref: respBodyRefName,
+				}
+
 			}
 
 		}
@@ -266,8 +358,8 @@ func (r *Registry) Generate() (*openapi3.T, error) {
 		return nil, r.err
 	}
 
-	if r.Config.ServerInfo == nil {
-		r.Config.ServerInfo = &openapi3.Info{
+	if r.Config.serverInfo == nil {
+		r.Config.serverInfo = &openapi3.Info{
 			Title:          "My Server",
 			Description:    "Description server",
 			TermsOfService: "",
@@ -278,8 +370,8 @@ func (r *Registry) Generate() (*openapi3.T, error) {
 
 	}
 
-	if r.Config.Servers == nil {
-		r.Config.Servers = openapi3.Servers{
+	if r.Config.servers == nil {
+		r.Config.servers = openapi3.Servers{
 			{
 				URL:         "https://example.com/",
 				Description: "This is example URL",
@@ -292,10 +384,10 @@ func (r *Registry) Generate() (*openapi3.T, error) {
 		ExtensionProps: openapi3.ExtensionProps{},
 		OpenAPI:        "3.0.3",
 		Components:     *r.components,
-		Info:           r.Config.ServerInfo,
+		Info:           r.Config.serverInfo,
 		Paths:          r.paths,
 		Security:       nil,
-		Servers:        r.Config.Servers,
+		Servers:        r.Config.servers,
 		Tags:           nil,
 		ExternalDocs:   nil,
 	}

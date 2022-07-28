@@ -26,9 +26,7 @@ type PetCreateReq struct {
 }
 
 type PetCreateResp struct {
-	Data struct {
-		Pet *Pet `json:"pet" openapi3:"desc:'pet schema'"`
-	} `json:"data"`
+	Pet *Pet `json:"pet" openapi3:"desc:'pet schema'"`
 }
 
 type ErrorData struct {
@@ -38,6 +36,16 @@ type ErrorData struct {
 
 type Error struct {
 	Error ErrorData `json:"error,omitempty" openapi3:"desc:xxx"`
+}
+
+type RespWrapper struct {
+	Data interface{} `json:"data"`
+}
+
+func Resp(data interface{}) RespWrapper {
+	return RespWrapper{
+		Data: data,
+	}
 }
 
 func main() {
@@ -64,12 +72,10 @@ func main() {
 		},
 	}
 
-	cfg := openapidoc.Config{
-		ServerInfo: info,
-		Servers:    servers,
-	}
-
-	reg := openapidoc.NewRegistry(cfg)
+	reg := openapidoc.NewRegistry(
+		openapidoc.WithServerInfo(info),
+		openapidoc.WithServers(servers),
+	)
 
 	reg.Add(http.MethodPost, "/pets/{id}",
 		request.NewRequest().
@@ -81,12 +87,18 @@ func main() {
 			),
 
 		map[string]*response.Response{
-			// response 201
+			// 201
 			fmt.Sprintf("%d", http.StatusCreated): response.NewResponse().
-				Body("application/json", PetCreateResp{}).
+				Body("application/json", RespWrapper{Data: PetCreateResp{}}, response.WithSchemaName("PetCreateResp201")).
 				Header(header.NewHeader().
 					Add("Location", header.Map{Value: "/pets/:id", Description: "Newly created pets"}),
 				),
+
+			// 200
+			fmt.Sprintf("%d", http.StatusOK): response.NewResponse().
+				Body("application/json", RespWrapper{Data: PetCreateResp{}}, response.WithSchemaName("PetCreateResp200")),
+
+			// 422
 			fmt.Sprintf("%d", http.StatusUnprocessableEntity): response.NewResponse().
 				Body("application/json", Error{}),
 		},

@@ -18,7 +18,7 @@ type PathParam struct {
 
 type Request struct {
 	// bodies map k = content type, v = struct data
-	bodies map[string]interface{}
+	bodies map[string]body
 
 	// headers is the header map of this response
 	headers []*header.Header
@@ -35,14 +35,24 @@ type Request struct {
 
 func NewRequest() *Request {
 	return &Request{
-		bodies:     map[string]interface{}{},
+		bodies:     map[string]body{},
 		headers:    make([]*header.Header, 0),
 		pathParams: make([]PathParam, 0),
 	}
 }
 
-func (r *Request) Body(contentType string, data interface{}) *Request {
-	r.bodies[contentType] = data
+func (r *Request) Body(contentType string, data interface{}, opts ...func(*bodyOpt)) *Request {
+	reqData := body{
+		data: data,
+		opts: &bodyOpt{},
+	}
+
+	// override the options
+	for _, opt := range opts {
+		opt(reqData.opts)
+	}
+
+	r.bodies[contentType] = reqData
 	return r
 }
 
@@ -141,10 +151,17 @@ func (r *Request) Components(gen *openapi3gen.Generator, requestName string) (co
 
 	for contentType, bodyPayload := range r.bodies {
 		// generate schemaRef and add to the schema map
-		schemaName := fmt.Sprintf("%T", bodyPayload)
+		schemaName := fmt.Sprintf("%T", bodyPayload.data)
+		if bodyPayload.opts.withSchemaName != "" {
+			schemaName = bodyPayload.opts.withSchemaName
+		}
+
+		if bodyPayload.opts.withPrefixRequestName {
+			schemaName = fmt.Sprintf("%s-%s", requestName, schemaName)
+		}
 
 		var schemaRef *openapi3.SchemaRef
-		schemaRef, err = gen.NewSchemaRefForValue(bodyPayload, nil)
+		schemaRef, err = gen.NewSchemaRefForValue(bodyPayload.data, nil)
 		if err != nil {
 			err = fmt.Errorf("error generate schema request %s: %w", schemaName, err)
 			return
