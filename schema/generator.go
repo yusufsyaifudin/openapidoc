@@ -5,7 +5,10 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"reflect"
 	"strings"
+	"sync/atomic"
 )
+
+var inc atomic.Int64
 
 type Generator struct {
 	// Types save the same struct name as key.
@@ -49,13 +52,16 @@ func (g *Generator) Generate(structValue interface{}) map[string]*openapi3.Schem
 	}
 
 	for i := 0; i < num; i++ {
+
 		field := fields.Field(i)
 		value := values.Field(i)
 
-		//fmt.Printf("%T    : Type: %s, %s.%s: %+v\n",
+		//fmt.Printf("%T    : Type: %s %s: %+v\n",
 		//	structValue,
-		//	field.Type, parentSchemaName, field.Name, value,
+		//	field.Type, field.Name, value,
 		//)
+
+		fmt.Printf("%d_ %T %+v %+v\n", inc.Add(1), value.Interface(), value.Interface(), field.Name)
 
 		// iterate over the values
 		// With this methodology, we expect that all values must be set in the struct when we add as open api schema.
@@ -74,9 +80,12 @@ func (g *Generator) Generate(structValue interface{}) map[string]*openapi3.Schem
 			}
 
 			// get value fields
-			schemaName, schema := g.generateWithoutSaving(ptrVal.Interface())
+			schemaName, schema := g.generateWithoutSaving(field.Name, ptrVal.Interface())
 			if g.schemas[schemaName] != nil {
 				// if schema name already exist then don't generate it again
+				currentSchema[field.Name] = &openapi3.SchemaRef{
+					Ref: fmt.Sprintf("#/components/schemas/%s", schemaName),
+				}
 				continue
 			}
 
@@ -95,9 +104,12 @@ func (g *Generator) Generate(structValue interface{}) map[string]*openapi3.Schem
 		case reflect.Interface:
 
 			// generate new schema for this type and refer generated schema to this one.
-			schemaName, schema := g.generateWithoutSaving(value.Interface())
+			schemaName, schema := g.generateWithoutSaving(field.Name, value.Interface())
 			if g.schemas[schemaName] != nil {
-				// if schema name already exist then don't generate it again
+
+				currentSchema[field.Name] = &openapi3.SchemaRef{
+					Ref: fmt.Sprintf("#/components/schemas/%s", schemaName),
+				}
 				continue
 			}
 
@@ -121,6 +133,7 @@ func (g *Generator) Generate(structValue interface{}) map[string]*openapi3.Schem
 					Example: value.Interface(),
 				},
 			}
+			continue
 		}
 
 	}
@@ -141,7 +154,7 @@ func (g *Generator) Generate(structValue interface{}) map[string]*openapi3.Schem
 	return g.schemas
 }
 
-func (g *Generator) generateWithoutSaving(structValue interface{}) (schemaName string, currentSchema map[string]*openapi3.SchemaRef) {
+func (g *Generator) generateWithoutSaving(parentFieldName string, structValue interface{}) (schemaName string, currentSchema map[string]*openapi3.SchemaRef) {
 	currentSchema = map[string]*openapi3.SchemaRef{}
 
 	fields := reflect.TypeOf(structValue)
@@ -163,15 +176,27 @@ func (g *Generator) generateWithoutSaving(structValue interface{}) (schemaName s
 		panic(err)
 	}
 
+	// this points to output named params
 	schemaName = fmt.Sprintf("%T", structValue)
 	schemaName = strings.TrimPrefix(schemaName, "*")
 	for strings.HasPrefix(schemaName, "*") {
 		schemaName = strings.TrimPrefix(schemaName, "*")
 	}
 
+	//fmt.Printf("%d %T %s %+v\n", inc.Add(1), values.Interface(), parentFieldName, values.Interface())
+
 	for i := 0; i < num; i++ {
 		field := fields.Field(i)
 		value := values.Field(i)
+
+		// if schema name already exist then don't generate it again
+		if g.schemas[schemaName] != nil {
+			//fmt.Println(parentFieldName, schemaName, field.Name, "this")
+			currentSchema[field.Name] = &openapi3.SchemaRef{
+				Ref: fmt.Sprintf("#/components/schemas/%s", schemaName),
+			}
+			continue
+		}
 
 		switch value.Kind() {
 		case reflect.Ptr:
@@ -186,9 +211,14 @@ func (g *Generator) generateWithoutSaving(structValue interface{}) (schemaName s
 				ptrVal = ptrVal.Elem()
 			}
 
-			newSchemaName, newSchema := g.generateWithoutSaving(ptrVal.Interface())
+			newSchemaName, newSchema := g.generateWithoutSaving(field.Name, ptrVal.Interface())
 			if g.schemas[newSchemaName] != nil {
+				//fmt.Printf("%d %+v %+v\n", inc.Add(1), newSchemaName, ptrVal.Interface())
+
 				// if schema name already exist then don't generate it again
+				currentSchema[field.Name] = &openapi3.SchemaRef{
+					Ref: fmt.Sprintf("#/components/schemas/%s", newSchemaName),
+				}
 				continue
 			}
 
@@ -205,32 +235,16 @@ func (g *Generator) generateWithoutSaving(structValue interface{}) (schemaName s
 
 			continue
 
-		case reflect.Interface:
+		case reflect.Interface, reflect.Struct:
 
-			newSchemaName, newSchema := g.generateWithoutSaving(value.Interface())
+			newSchemaName, newSchema := g.generateWithoutSaving(field.Name, value.Interface())
 			if g.schemas[newSchemaName] != nil {
+				//fmt.Printf("%d %+v %+v\n", inc.Add(1), newSchemaName, value.Interface())
+
 				// if schema name already exist then don't generate it again
-				continue
-			}
-
-			g.schemas[newSchemaName] = &openapi3.SchemaRef{
-				Value: &openapi3.Schema{
-					Type:       "object",
-					Properties: newSchema,
-				},
-			}
-
-			currentSchema[field.Name] = &openapi3.SchemaRef{
-				Ref: fmt.Sprintf("#/components/schemas/%s", newSchemaName),
-			}
-
-			continue
-
-		case reflect.Struct:
-
-			newSchemaName, newSchema := g.generateWithoutSaving(value.Interface())
-			if g.schemas[newSchemaName] != nil {
-				// if schema name already exist then don't generate it again
+				currentSchema[field.Name] = &openapi3.SchemaRef{
+					Ref: fmt.Sprintf("#/components/schemas/%s", newSchemaName),
+				}
 				continue
 			}
 
@@ -248,6 +262,15 @@ func (g *Generator) generateWithoutSaving(structValue interface{}) (schemaName s
 			continue
 
 		default:
+
+			//fmt.Printf("%d %+v %+v\n", inc.Add(1), field.Name, value.Interface())
+
+			//g.schemas[newSchemaName] = &openapi3.SchemaRef{
+			//	Value: &openapi3.Schema{
+			//		Type:       "object",
+			//		Properties: newSchema,
+			//	},
+			//}
 
 			currentSchema[field.Name] = &openapi3.SchemaRef{
 				Value: &openapi3.Schema{

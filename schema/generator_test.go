@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/stretchr/testify/assert"
 	"github.com/yusufsyaifudin/openapidoc/schema"
 	"gopkg.in/yaml.v3"
+	"os"
 	"testing"
 )
 
@@ -33,23 +35,32 @@ func PetWrap(i interface{}) Pet {
 }
 
 type RecursiveType struct {
-	Field1     string           `json:"field1"`
-	Field2     string           `json:"field2"`
-	Field3     string           `json:"field3"`
-	Components []*RecursiveType `json:"children,omitempty"`
+	Field1     string          `json:"field1"`
+	Field2     string          `json:"field2"`
+	Field3     string          `json:"field3"`
+	Components []RecursiveType `json:"children,omitempty"`
 }
 
 func TestGenerator_Generate(t *testing.T) {
 	v := PetWrap(Cat{
 		Meow: "haha",
 		Child: &Cat{
-			Meow: "",
+			Meow: "hey",
 			Child: &Cat{
-				Meow:          "",
-				Child:         nil,
-				AnotherStruct: AnotherStruct{},
+				Meow: "hoi",
+				Child: &Cat{
+					Meow:          "miew",
+					Child:         nil,
+					AnotherStruct: AnotherStruct{},
+				},
+				AnotherStruct: AnotherStruct{
+					HOHO: "",
+				},
 			},
 			AnotherStruct: AnotherStruct{},
+		},
+		AnotherStruct: AnotherStruct{
+			HOHO: "hoho1",
 		},
 	})
 
@@ -81,5 +92,10 @@ func TestGenerator_Generate(t *testing.T) {
 	enc.SetIndent(2)
 	_ = enc.Encode(openapiDoc)
 
-	fmt.Println(openapiDocBytes.String())
+	curDir, err := os.Getwd()
+	assert.NotEmpty(t, curDir)
+	assert.NoError(t, err)
+
+	err = os.WriteFile(fmt.Sprintf("%s/tmp.yaml", curDir), openapiDocBytes.Bytes(), os.ModePerm)
+	assert.NoError(t, err)
 }
