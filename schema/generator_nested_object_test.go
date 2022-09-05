@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
+	"github.com/yusufsyaifudin/openapidoc/schema/testasset"
 	"gopkg.in/yaml.v3"
 	"net/http"
 	"os"
@@ -14,17 +15,7 @@ import (
 	"time"
 )
 
-type ResourceName string
-
-type Quantity struct {
-	Value string
-}
-
-func (q *Quantity) String() string {
-	return q.Value
-}
-
-type ResourceList map[ResourceName]Quantity
+type ResourceList map[testasset.ResourceName]testasset.Quantity
 
 func TestRecursiveObject(t *testing.T) {
 	type Chain struct {
@@ -223,12 +214,12 @@ func TestCustomType(t *testing.T) {
 
 	v := Custom{
 		Limits: ResourceList{
-			"cpu":    Quantity{Value: "100m"},
-			"memory": Quantity{Value: "1Gi"},
+			"cpu":    testasset.NewQuantity("100m"),
+			"memory": testasset.NewQuantity("1Gi"),
 		},
 		Requests: ResourceList{
-			"cpu":    Quantity{Value: "100m"},
-			"memory": Quantity{Value: "1Gi"},
+			"cpu":    testasset.NewQuantity("100m"),
+			"memory": testasset.NewQuantity("1Gi"),
 		},
 	}
 

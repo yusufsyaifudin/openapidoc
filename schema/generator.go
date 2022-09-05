@@ -348,7 +348,7 @@ func (g *Generator) generate(
 			// check if pointer is nil
 			if value.IsZero() {
 				msg := make([]byte, 0)
-				msg = fmt.Appendf(msg, "%d zero pointer", called)
+				msg = fmt.Appendf(msg, "%d zero pointer\n", called)
 				_, _ = g.logWriter.Write(msg)
 
 				continue
@@ -358,6 +358,14 @@ func (g *Generator) generate(
 			ptrVal := values.Field(i)
 			for ptrVal.Kind() == reflect.Ptr {
 				ptrVal = ptrVal.Elem()
+			}
+
+			if !ptrVal.CanInterface() {
+				msg := make([]byte, 0)
+				msg = fmt.Appendf(msg, "%d not exported field '%s'\n", called, field.Name)
+				_, _ = g.logWriter.Write(msg)
+
+				continue
 			}
 
 			err = g.generate(ctx, called+1, fmt.Sprintf("%s.%s", jsonPath, propertyFieldName), ptrVal.Interface(), schemaRef)
@@ -373,12 +381,22 @@ func (g *Generator) generate(
 		case reflect.Map:
 
 			mapSchemaProps := make(map[string]*openapi3.SchemaRef)
+			mapExample := make(map[string]interface{})
+
 			mapIter := value.MapRange()
 			for mapIter.Next() {
 				// for type map, use key as-is it defined on the struct value as an example.
 				// For value, we will try to generate it again
 				mapKeyName := fmt.Sprintf("%s", mapIter.Key().Interface())
 				mapValue := mapIter.Value()
+
+				// use string format as value example
+				example := fmt.Sprintf("%+v", mapValue.Interface())
+				if stringer, ok := mapValue.Interface().(interface{ String() string }); ok {
+					example = stringer.String()
+				}
+
+				mapExample[mapKeyName] = example
 
 				jsonPath = fmt.Sprintf("%s.%s", jsonPath, mapKeyName)
 				err = g.generate(ctx, called+1, jsonPath, mapValue.Interface(), mapSchemaProps)
@@ -400,7 +418,7 @@ func (g *Generator) generate(
 			mapSchema := &openapi3.SchemaRef{
 				Value: &openapi3.Schema{
 					Type:       "object",
-					Example:    value.Interface(),
+					Example:    mapExample,
 					Properties: mapSchemaPropsRef,
 				},
 			}
