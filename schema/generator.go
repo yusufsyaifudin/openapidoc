@@ -137,10 +137,10 @@ func (g *Generator) generate(
 		values = values.Elem()
 	}
 
-	num := fields.NumField()
+	numField := fields.NumField()
 	numVal := values.NumField()
-	if num != numVal {
-		err = fmt.Errorf("reflect.Type num fields is %d but reflect.Value num fields is %d", num, numVal)
+	if numField != numVal {
+		err = fmt.Errorf("reflect.Type numField fields is %d but reflect.Value numField fields is %d", numField, numVal)
 		return
 	}
 
@@ -157,13 +157,14 @@ func (g *Generator) generate(
 			}
 		} else {
 			msg = fmt.Appendf(msg, "%d not exist, will append schema name %s\n", called, schemaName)
+			msg = fmt.Appendf(msg, "%d not exist, type %s json path '%s'\n", called, reflect.TypeOf(structValue).Kind(), jsonPath)
 		}
 
 		_, _ = g.logWriter.Write(msg)
 
 	}
 
-	for i := 0; i < num; i++ {
+	for i := 0; i < numField; i++ {
 
 		field := fields.Field(i)
 		value := values.Field(i)
@@ -190,6 +191,15 @@ func (g *Generator) generate(
 			propertyFieldName = field.Name
 		}
 
+		if g.logEnabled {
+			msg := make([]byte, 0)
+			msg = fmt.Appendf(msg,
+				"%d iterate field name '%s' as '%s' with type %s\n",
+				called, field.Name, propertyFieldName, value.Kind(),
+			)
+			_, _ = g.logWriter.Write(msg)
+		}
+
 		// iterate over the values
 		// With this methodology, we expect that all values must be set in the struct when we add as open api schema.
 		// All values in this struct also be used as example.
@@ -206,6 +216,7 @@ func (g *Generator) generate(
 
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Value: &openapi3.Schema{
 					Type:    "integer",
@@ -214,6 +225,7 @@ func (g *Generator) generate(
 			}
 
 		case reflect.Float32, reflect.Float64:
+
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Value: &openapi3.Schema{
 					Type:    "number",
@@ -222,14 +234,9 @@ func (g *Generator) generate(
 			}
 
 		case reflect.String:
-			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
-				Value: &openapi3.Schema{
-					Type:    "string",
-					Example: value.Interface(),
-				},
-			}
-
-		case reflect.TypeOf(time.Time{}).Kind():
+			msg := make([]byte, 0)
+			msg = fmt.Appendf(msg, "%d string", called)
+			_, _ = g.logWriter.Write(msg)
 
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Value: &openapi3.Schema{
@@ -239,6 +246,17 @@ func (g *Generator) generate(
 			}
 
 		case reflect.Interface, reflect.Struct:
+			if _, ok := value.Interface().(time.Time); ok {
+				currentSchema[propertyFieldName] = &openapi3.SchemaRef{
+					Value: &openapi3.Schema{
+						Type:    "string",
+						Example: value.Interface(),
+					},
+				}
+
+				continue
+			}
+
 			//objSchemaRefs := make(map[string]*openapi3.SchemaRef)
 
 			err = g.generate(ctx, called+1, fmt.Sprintf("%s.%s", jsonPath, propertyFieldName), value.Interface(), schemaRef)
@@ -255,6 +273,7 @@ func (g *Generator) generate(
 
 			//allOfSchemaRef := make([]*openapi3.SchemaRef, 0)
 			//for objSchemaName, objSchemaRef := range objSchemaRefs {
+			//
 			//	// add to the final output
 			//	schemaRef[objSchemaName] = objSchemaRef
 			//
@@ -273,6 +292,10 @@ func (g *Generator) generate(
 			//}
 
 		case reflect.Slice, reflect.Array:
+
+			msg := make([]byte, 0)
+			msg = fmt.Appendf(msg, "%d slice", called)
+			_, _ = g.logWriter.Write(msg)
 
 			allObjInArr := make(map[string]*openapi3.SchemaRef)
 
@@ -316,10 +339,12 @@ func (g *Generator) generate(
 			}
 
 		case reflect.Ptr:
-
 			// check if pointer is nil
 			if value.IsZero() {
-				//fmt.Println("is zero", called)
+				msg := make([]byte, 0)
+				msg = fmt.Appendf(msg, "%d zero pointer", called)
+				_, _ = g.logWriter.Write(msg)
+
 				continue
 			}
 
@@ -340,13 +365,15 @@ func (g *Generator) generate(
 			}
 
 		default:
+			msg := make([]byte, 0)
+			msg = fmt.Appendf(msg, "%d default", called)
+			_, _ = g.logWriter.Write(msg)
 
 			// error still using field.Name for clarity. It refers to the original Go field name,
 			// not from golang tag
 			err = fmt.Errorf("not supported type %s on field '%s'", value.Kind(), field.Name)
 			return
 		}
-
 	}
 
 	// ensure that we don't need to check if schemaName already exist in the map,
