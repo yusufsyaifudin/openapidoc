@@ -200,6 +200,17 @@ func (g *Generator) generate(
 			_, _ = g.logWriter.Write(msg)
 		}
 
+		if !value.CanInterface() {
+			msg := make([]byte, 0)
+			msg = fmt.Appendf(msg,
+				"%d field '%s' on struct '%T' is unexported and Interface cannot be used without panicking\n",
+				called, field.Name, structValue,
+			)
+			_, _ = g.logWriter.Write(msg)
+
+			continue
+		}
+
 		// iterate over the values
 		// With this methodology, we expect that all values must be set in the struct when we add as open api schema.
 		// All values in this struct also be used as example.
@@ -234,9 +245,6 @@ func (g *Generator) generate(
 			}
 
 		case reflect.String:
-			msg := make([]byte, 0)
-			msg = fmt.Appendf(msg, "%d string", called)
-			_, _ = g.logWriter.Write(msg)
 
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Value: &openapi3.Schema{
