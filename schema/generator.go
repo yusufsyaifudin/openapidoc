@@ -14,9 +14,10 @@ import (
 type Opt func(*Generator) error
 
 type Generator struct {
-	logEnabled bool
-	logWriter  io.Writer
-	goTag      []string
+	logEnabled   bool
+	logWriter    io.Writer
+	goTag        []string
+	schemaPrefix string
 }
 
 // WithLog enables debug log to see how Schema will be appended as final Schemas.
@@ -55,6 +56,14 @@ func WithGoTag(tags []string) Opt {
 	}
 }
 
+func WithSchemaPrefix(prefix string) Opt {
+	return func(gen *Generator) error {
+		prefix = strings.TrimSpace(prefix)
+		gen.schemaPrefix = prefix
+		return nil
+	}
+}
+
 func NewGenerator(options ...Opt) (*Generator, error) {
 
 	gen := &Generator{
@@ -75,14 +84,14 @@ func NewGenerator(options ...Opt) (*Generator, error) {
 	return gen, nil
 }
 
-func getSchemaName(structValue interface{}) string {
+func getSchemaName(prefix string, structValue interface{}) string {
 	schemaName := fmt.Sprintf("%T", structValue)
 	schemaName = strings.TrimPrefix(schemaName, "*")
 	for strings.HasPrefix(schemaName, "*") {
 		schemaName = strings.TrimPrefix(schemaName, "*")
 	}
 
-	return schemaName
+	return fmt.Sprintf("%s%s", prefix, schemaName)
 }
 
 type GenerateOut struct {
@@ -92,7 +101,7 @@ type GenerateOut struct {
 }
 
 func (g *Generator) Generate(ctx context.Context, structValue interface{}) (out GenerateOut, err error) {
-	parentSchemaName := getSchemaName(structValue)
+	parentSchemaName := getSchemaName(g.schemaPrefix, structValue)
 
 	schemaRef := make(map[string]*openapi3.SchemaRef)
 	err = g.generate(ctx, 0, "", structValue, schemaRef)
@@ -135,7 +144,7 @@ func (g *Generator) generate(
 		return
 	}
 
-	schemaName := getSchemaName(structValue)
+	schemaName := getSchemaName(g.schemaPrefix, structValue)
 
 	if g.logEnabled {
 		msg := make([]byte, 0)
@@ -239,7 +248,7 @@ func (g *Generator) generate(
 
 			// This is enough if we have simple object.
 			// But, if we have multiple object or recursive object, then we need allOf method
-			newSchemaName := getSchemaName(value.Interface())
+			newSchemaName := getSchemaName(g.schemaPrefix, value.Interface())
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Ref: fmt.Sprintf("#/components/schemas/%s", newSchemaName),
 			}
@@ -325,7 +334,7 @@ func (g *Generator) generate(
 				return
 			}
 
-			newSchemaName := getSchemaName(ptrVal.Interface())
+			newSchemaName := getSchemaName(g.schemaPrefix, ptrVal.Interface())
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Ref: fmt.Sprintf("#/components/schemas/%s", newSchemaName),
 			}
