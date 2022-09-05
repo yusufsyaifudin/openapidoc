@@ -1,0 +1,97 @@
+components:
+  requestBodies:
+    myReqBodyName:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/schema.Parent'
+  schemas:
+    schema.Children:
+      properties:
+        age:
+          example: 35
+          type: integer
+        childrens:
+          example:
+            - age: 3
+              childrens: null
+              name: Aji Child 1
+              national_id: 100.11
+            - age: 1
+              childrens: null
+              name: Aji Child 2
+              national_id: 100.12
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/schema.Children'
+          type: array
+        name:
+          example: Aji
+          type: string
+        national_id:
+          example: 100.1
+          type: number
+      type: object
+    schema.Parent:
+      properties:
+        age:
+          example: 70
+          type: integer
+        childrens:
+          example:
+            - age: 35
+              childrens:
+                - age: 3
+                  childrens: null
+                  name: Aji Child 1
+                  national_id: 100.11
+                - age: 1
+                  childrens: null
+                  name: Aji Child 2
+                  national_id: 100.12
+              name: Aji
+              national_id: 100.1
+            - age: 30
+              childrens:
+                - age: 1
+                  childrens: null
+                  name: Bayu Child 1
+                  national_id: 100.21
+              name: Bayu
+              national_id: 100.2
+            - age: 28
+              childrens: null
+              name: Chandra
+              national_id: 100.3
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/schema.Children'
+          type: array
+        deceased:
+          example: true
+          type: boolean
+        name:
+          example: John
+          type: string
+        national_id:
+          example: 100
+          type: number
+      type: object
+info:
+  title: My API
+  version: 1.0.0
+openapi: 3.0.0
+paths:
+  /family-tree:
+    post:
+      requestBody:
+        $ref: '#/components/requestBodies/myReqBodyName'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schema.Parent'
+          description: desc
+        default:
+          description: ""
