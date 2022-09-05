@@ -241,16 +241,22 @@ func (g *Generator) generate(
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Value: &openapi3.Schema{
 					Type:    "string",
-					Example: value.Interface(),
+					Example: value.String(),
 				},
 			}
 
 		case reflect.Interface, reflect.Struct:
+			// if implements fmt.Stringer
+			example := value.Interface()
+			if stringer, ok := value.Interface().(interface{ String() string }); ok {
+				example = stringer.String()
+			}
+
 			if _, ok := value.Interface().(time.Time); ok {
 				currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 					Value: &openapi3.Schema{
 						Type:    "string",
-						Example: value.Interface(),
+						Example: example,
 					},
 				}
 
@@ -363,6 +369,43 @@ func (g *Generator) generate(
 			currentSchema[propertyFieldName] = &openapi3.SchemaRef{
 				Ref: fmt.Sprintf("#/components/schemas/%s", newSchemaName),
 			}
+
+		case reflect.Map:
+
+			mapSchemaProps := make(map[string]*openapi3.SchemaRef)
+			mapIter := value.MapRange()
+			for mapIter.Next() {
+				// for type map, use key as-is it defined on the struct value as an example.
+				// For value, we will try to generate it again
+				mapKeyName := fmt.Sprintf("%s", mapIter.Key().Interface())
+				mapValue := mapIter.Value()
+
+				jsonPath = fmt.Sprintf("%s.%s", jsonPath, mapKeyName)
+				err = g.generate(ctx, called+1, jsonPath, mapValue.Interface(), mapSchemaProps)
+				if err != nil {
+					return
+				}
+			}
+
+			mapSchemaPropsRef := make(map[string]*openapi3.SchemaRef)
+			for mapSchemaName, mapSchemaRef := range mapSchemaProps {
+				// add to final output schema map
+				schemaRef[mapSchemaName] = mapSchemaRef
+
+				mapSchemaPropsRef[mapSchemaName] = &openapi3.SchemaRef{
+					Ref: fmt.Sprintf("#/components/schemas/%s", mapSchemaName),
+				}
+			}
+
+			mapSchema := &openapi3.SchemaRef{
+				Value: &openapi3.Schema{
+					Type:       "object",
+					Example:    value.Interface(),
+					Properties: mapSchemaPropsRef,
+				},
+			}
+
+			currentSchema[propertyFieldName] = mapSchema
 
 		default:
 			msg := make([]byte, 0)
