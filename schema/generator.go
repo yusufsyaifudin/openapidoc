@@ -86,6 +86,10 @@ func NewGenerator(options ...Opt) (*Generator, error) {
 
 func getSchemaName(prefix string, structValue interface{}) string {
 	schemaName := fmt.Sprintf("%T", structValue)
+	if reflect.TypeOf(structValue).Kind() == reflect.String {
+		schemaName = fmt.Sprintf("%s", structValue)
+	}
+
 	schemaName = strings.TrimPrefix(schemaName, "*")
 	for strings.HasPrefix(schemaName, "*") {
 		schemaName = strings.TrimPrefix(schemaName, "*")
@@ -125,6 +129,8 @@ func (g *Generator) generate(
 ) (err error) {
 	currentSchema := map[string]*openapi3.SchemaRef{}
 
+	schemaName := getSchemaName(g.schemaPrefix, structValue)
+
 	fields := reflect.TypeOf(structValue)
 	values := reflect.ValueOf(structValue)
 
@@ -137,14 +143,25 @@ func (g *Generator) generate(
 		values = values.Elem()
 	}
 
+	if values.Kind() != reflect.Struct || fields.Kind() != reflect.Struct {
+		if g.logEnabled {
+			msg := make([]byte, 0)
+			msg = fmt.Appendf(msg,
+				"%d stop the iteration because the type is not struct but %T with name %s %+v\n",
+				called, structValue, schemaName, structValue,
+			)
+
+			_, _ = g.logWriter.Write(msg)
+		}
+		return
+	}
+
 	numField := fields.NumField()
 	numVal := values.NumField()
 	if numField != numVal {
 		err = fmt.Errorf("reflect.Type numField fields is %d but reflect.Value numField fields is %d", numField, numVal)
 		return
 	}
-
-	schemaName := getSchemaName(g.schemaPrefix, structValue)
 
 	if g.logEnabled {
 		msg := make([]byte, 0)
@@ -398,6 +415,18 @@ func (g *Generator) generate(
 				mapKeyName := fmt.Sprintf("%s", mapIter.Key().Interface())
 				mapValue := mapIter.Value()
 
+				if mapValue.Kind() == reflect.String {
+					mapExample[mapKeyName] = mapValue.Interface()
+
+					mapSchemaProps[mapKeyName] = &openapi3.SchemaRef{
+						Value: &openapi3.Schema{
+							Type:    "string",
+							Example: fmt.Sprintf("%s", mapValue.Interface()),
+						},
+					}
+					continue
+				}
+
 				// use string format as value example
 				example := fmt.Sprintf("%+v", mapValue.Interface())
 				if stringer, ok := mapValue.Interface().(interface{ String() string }); ok {
@@ -416,6 +445,7 @@ func (g *Generator) generate(
 			mapSchemaPropsRef := make(map[string]*openapi3.SchemaRef)
 			for mapSchemaName, mapSchemaRef := range mapSchemaProps {
 				// add to final output schema map
+				mapSchemaName = getSchemaName(g.schemaPrefix, mapSchemaName)
 				schemaRef[mapSchemaName] = mapSchemaRef
 
 				mapSchemaPropsRef[mapSchemaName] = &openapi3.SchemaRef{
